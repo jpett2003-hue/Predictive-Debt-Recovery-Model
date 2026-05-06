@@ -27,7 +27,6 @@ library(knitr)
 
 
 ```{r}
-
 # Creating data we can use for the project
 set.seed(2026)
 n_records <- 1000
@@ -44,17 +43,30 @@ hospital_data <- tibble(
 
 ) %>%
   mutate(
-#1: Age affects status of invoice (Lets assume older patients = higher denial risk)
+    # --- ASSUMPTION 1: Location & Age affect Status ---
     Status = case_when(
-      Patient_Age > 75 & runif(n()) < 0.3 ~ "Written Off", #if patient over 75, 30% chance that claim is written off
-      runif(n()) < 0.1 ~ "Written Off", #baseline risk for everyone else, we assume a 10% chance of a claim being written off regardless of age.
-      runif(n()) < 0.15 ~ "Pending", #for any claims not yet written off, there is a 15% chance they are pending
-      TRUE ~ "Paid" #if none of the conditions above are met, the claim is considered paid
+      # 1. RURAL PENDING BOOST: Healesville/Angliss get 50% Pending rate
+      Location %in% c("Healesville", "Angliss") & runif(n()) < 0.15 ~ "Pending",
+      
+      # 2. Written Off (Age-based)
+      Patient_Age > 75 & runif(n()) < 0.15 ~ "Written Off",
+      runif(n()) < 0.04 ~ "Written Off",
+      
+      # 3. Pending (Age-based/Baseline for everyone else)
+      Patient_Age > 75 & runif(n()) < 0.35 ~ "Pending",
+      runif(n()) < 0.10 ~ "Pending",
+      
+      # 4. Majority is Paid
+      TRUE ~ "Paid"
     ),
-#2: Location affects payment speed (Lets assume outer suburbs take longer)
-    Base_Delay = sample(0:25, n(), replace = TRUE), #random baseline delay of 0-25 days
+    
+    # --- ASSUMPTION 2: Location affects Payment Speed ---
+    Base_Delay = sample(0:30, n(), replace = TRUE),
+    
+    # The "Location Adjustment" mutation for timing
     Location_Adj = if_else(Location %in% c("Healesville", "Angliss"),
-                           sample(5:10, n(), replace = TRUE), 0), #assumes that rural areas will have more delayed payments
+                           sample(5:15, n(), replace = TRUE), 0),
+                           
     Days_to_Pay = Base_Delay + Location_Adj
   )
 
@@ -64,25 +76,50 @@ tail(hospital_data, 3)
 
 
 
-```{r}
 
-ggplot(hospital_data, aes(x = Claim_Amount)) +
+
+```{r}
+# Plot 1: Distribution of Claims
+distribution_claims <- ggplot(hospital_data, aes(x = Claim_Amount)) +
   geom_histogram(binwidth = 10, fill = "steelblue", color = "white") +
-  # Zooming in to $500 so you can actually see the peak
-  coord_cartesian(xlim = c(0, 500)) + 
+  coord_cartesian(xlim = c(0, 500)) + # Zooming in to $500 so you can actually see the peak
   labs(title = "Distribution of Claim Amounts",
        subtitle = "Demonstrating the Log-Normal 'Long Tail' for Hospital Billing",
        x = "Claim Amount ($)",
        y = "Number of Invoices") +
   theme_minimal()
+
+# Plot 2: Patient Age Distribution
+plot_age_hist <- ggplot(hospital_data, aes(x = Patient_Age)) +
+  geom_histogram(binwidth = 5, fill = "steelblue", color = "white") +
+  labs(title = "Patient Age Distribution", x = "Age", y = "Amount of Patients") +
+  theme_minimal()
+
+# Plot 3. Total invoices at each hospital
+total_invoices <- ggplot(hospital_data, aes(x = Location, fill = Location)) +
+  geom_bar() +
+  labs(
+    title = "Total Invoice Volume by Hospital Location",
+    subtitle = "Comparing total claims across the 1,000 record dataset",
+    x = "Hospital",
+    y = "Number of Invoices"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+
+distribution_claims
+plot_age_hist
+total_invoices
 ```
 
-The majority of claims are concentrated in the low-value range, with a significant peak occurring between $20 and $60
+Looking at the first plot the Distribution of Claims, we can see that the majority of claims are concentrated in the low-value range, with a significant peak occurring between 20 dollars and 60 dollars. The distribution is heavily positively skewed, with the frequency dropping sharply after 60 dollars, the tail extends significantly toward the 500 dollar mark.
 
-The distribution is heavily positively skewed. While the frequency drops sharply after $60, the tail extends significantly toward the $500 mark.
+Looking at the Patient Age Distributio, we can  see a fairly even disturbution of patient age, maybe with a slight upward trend.
 
-Next lets see how many of these invoices are actually paid
+Looking at the third plot the Total invoices at each hospital, we can see a large amount of invoices being sent out from Box Hill at approximately 400 of the 1000 invoices we've generated. As the hospital get further and further from the city in more rural areas, we can see the amount of invoices decrease.
 
+Next lets see how many of these invoices are actually paid.
 
 
 ```{r}
@@ -93,9 +130,9 @@ status_counts <- hospital_data %>%
 
 # 2. Create the Bar Chart
 plot_status_volume <- ggplot(status_counts, aes(x = Status, y = n, fill = Status)) +
-  geom_col() +
+  geom_col(alpha = 0.7) +
   geom_text(aes(label = paste0(n, " (", round(percentage, 1), "%)")), 
-            vjust = -0.5, size = 5) +
+            vjust = -0.5) +
   scale_fill_manual(values = c("Paid" = "#4CAF50", 
                                "Pending" = "#FFC107", 
                                "Written Off" = "#F44336")) +
@@ -108,14 +145,15 @@ plot_status_volume <- ggplot(status_counts, aes(x = Status, y = n, fill = Status
 plot_status_volume
 ```
 
-We can see that out of 1,000 records, 722 are successfully paid. 
+We can see that out of 1,000 records, 741 are successfully paid, 185 pending and 74 written off. Our goal is to analyse whether certain demographics a big influence in the invoices being pending or written. 
 
 Next lets see whether age affects whether or not the invoice will be paid.
+
 
 ```{r}
 # Plot 1: Boxplot - Age vs Status
 plot_age_status <- ggplot(hospital_data, aes(x = Status, y = Patient_Age, fill = Status)) +
-  geom_boxplot(alpha = 0.75) +
+  geom_boxplot(alpha = 0.7) +
   
   # Assigning the colors: Paid = Green, Pending = Yellow, Written Off = Red
   scale_fill_manual(values = c("Paid" = "#4CAF50", 
@@ -128,17 +166,13 @@ plot_age_status <- ggplot(hospital_data, aes(x = Status, y = Patient_Age, fill =
 plot_age_status
 ```
 
-We can see that the paid box plot is evenly distributed, with a median age of approximately 48 and an interquartile range of 26 to 70. The distribution for pending claims is quite similar to that of paid claims, with a median age of roughly 47 and an IQR of 25 to 67
+We can see that the paid box plot is evenly distributed, with a median age of approximately 48 and an interquartile range of 26 to 70. 
 
-However the written off category shows a clear upward shift in age. The median age for written-off claims is approximately 80, with an IQR sitting between roughly 42 and 89.  
+The pending category shows an upward shift in age with a median age of approximately 60 and an IQR sitting between roughly 30 and 80.  
 
-This suggests that younger and middle-aged patients encounter the same minor delays (Pending) but eventually pay (Paid) at the same rate. Their age doesn't stop them from receiving or paying a bill.
+We see an even bigger jump in age with the written off category shows a clear upward shift in age. The median age for written-off claims is approximately 80, with an IQR sitting between roughly 42 and 89.  
 
-
---
-There is a clear upward shift in the median age for Written Off claims compared to Paid claims with a Written Off median of roughly 76 and Paid median of roughly 54. Pending and Paid appear to have similar plots
-
-Older patient demographics appear to be a substantial cause of revenue loss. This suggests that billing for older patients is inherently more complex, potentialy due to a problem with delivering the invoice. Modern day billing involves a heavy reliance on emailing and texting. Perhaps if the patient is above a certain age posting could be an automatic method of delivery.
+Older patient demographics appear to be a substantial cause of revenue loss. This suggests that billing for older patients is inherently more complex, potentially due to a problem with delivering the invoice. Modern day billing involves a heavy reliance on emailing and texting. Perhaps if the patient is above a certain age posting could be an automatic method of delivery.
 
 
 ```{r}
@@ -154,8 +188,8 @@ hospital_data_interactive <- hospital_data %>%
 # creating the ggplot object with custom text for later
 p <- ggplot(hospital_data_interactive, aes(x = Location, y = count, fill = Status, 
                                            text = paste0("<br>Count: ", count,
-                                                         "<br>Proportion: ", round(percentage, 2), "%"))) +
-  geom_col(position = "fill") + 
+                                                         "<br>Percentage: ", round(percentage, 2), "%"))) +
+  geom_col(position = "fill", alpha = 0.9) + 
   scale_y_continuous(labels = scales::percent) +
   
   # 3. Apply the original "Traffic Light" Color Palette
@@ -168,45 +202,24 @@ p <- ggplot(hospital_data_interactive, aes(x = Location, y = count, fill = Statu
        x = "Location") +
   theme_minimal()
 
-# 4. Convert the static plot to an interactive plotly object
-# The 'tooltip' argument tells plotly to only show our custom 'text' label
-ggplotly(p, tooltip = "text")
+# If in RStudio OR knitting to HTML, use hover, otherwise just show the static plot so it knits properly
+if (interactive() || knitr::is_html_output()) {
+  plotly::ggplotly(p, tooltip = "text")
+} 
 ```
 
+The distribution of claim statuses across the locations does not indicate drastic variance in revenue performance between different suburbs, however significant differences can be seen.
 
+Healesville represents a substantial area of concern, featuring the lowest recovery rate at 66% and a disproportionately high pending rate of 20%.
 
-```{r}
-# 1. Reorder the Status levels
-# In ggplot, the first level goes on the bottom of the stack.
-hospital_data_2 <- hospital_data %>%
-  mutate(Status = fct_relevel(Status, "Written Off", "Pending", "Paid"))
+In contrast, Box Hill demonstrates perhaps the strongest financial performance, with 75% of claims successfully paid. However they do have more claims written off than Healesville. This could mean that despite Healesville patients being very slow in paying invoices, they may eventually result in a higher paid proportion than Box Hill.
 
-# 2. Create the Bar Chart with Manual Colors
-ggplot(hospital_data_2, aes(x = Location, fill = Status)) +
-  geom_bar(position = "fill") + 
-  scale_y_continuous(labels = scales::percent) +
-  
-  # 3. Apply the "Traffic Light" Color Palette
-  # Paid = Green, Pending = Yellow/Amber, Written Off = Red
-  scale_fill_manual(values = c("Paid" = "#4CAF50", 
-                               "Pending" = "#FFC107", 
-                               "Written Off" = "#F44336")) +
-  
-  labs(title = "Revenue Risk Profile by Eastern Health Suburb",
-       y = "Proportion of Total Claims",
-       x = "Location") +
-  theme_minimal()
-```
+The high pending rate in Healesville highlights a localised challenge. Quite a few reasons could be the cause. It could be potentially due to slower documentation turnaround or more complex insurer interactions. Additionally, postal time could also be a factor as to why some locations have more invoices pending than others. Since older patients prefer receiving postal invoices, it could take longer for them to pay if the postal takes longer to deliver. Perhaps some hospitals aren't as efficient as others in sending out postal invoices. This will have to be investigated further through process reviews.
 
-The distribution of claim statuses across the locations does not indicate too significant of a variance in revenue performance between different suburbs. Healesville exhibits the highest levels of claims remaining unpaid, with successfully paid claims accounting for approximately 65% and total invoices. In contrast, Box Hill appears to be the hospital with most paid claims with 75%. Once again when looking at the proportion of written off claims to total invoices, it remains relatively consistent across all locations, generally hovering between 10-15% of the total invoice volume. The pending status appears to be the most signficant variance, with roughly 
+Box Hill serves as the benchmark for hospitals; standardising its processes across regional sites like Healesville could help minimise the risk seen in the high pending volume.
 
-Perhaps postal time could be a reason that some locations are more paid than others. Since older patients prefer receiving postal invoices, it could take longer for them to pay if the postal takes longer to deliver. Perhaps some hospitals aren't as efficient as others in sending out postal invoices
+Next we'll look into if certain locations are dominated by a certain age group, and whether or not this affects payment.
 
-~~
-
-The data suggests that larger, high-volume sites such as Box Hill and Maroondah face greater challenges in resolving billing discrepancies compared to smaller regional sites. This discrepancy may be attributed to the clinical complexity associated with tertiary hospital services, where intricate medical imaging procedures often lead to more frequent insurer scrutiny. The fact that the pending status is notably higher in Box Hill suggests a potential administrative bottleneck where documentation is still being processed or contested, whereas the lower pending rates in Healesville suggest a more streamlined or less complex billing cycle.
-
-To improve overall efficiency and reduce revenue leakage, it is recommended that Eastern Health prioritises administrative process reviews for the Maroondah and Box Hill catchments. By identifying the root causes of the elevated denial rates in these specific areas, the organisation can implement targeted training to ensure accurate documentation is provided before the initial billing submission. Standardising the documentation protocols to match the high-performance benchmarks seen in the Healesville catchment could serve as a viable strategy to decrease the volume of "at-risk" claims and enhance the predictability of the revenue cycle.
 
 
 ```{r}
@@ -218,19 +231,16 @@ plot_age_loc <- ggplot(hospital_data, aes(x = Location, y = Patient_Age, fill = 
   theme_minimal() + theme(legend.position = "none")
 
 plot_age_loc
-
 ```
 
+Healesville stands out with the highest median age at approximately 60 years. The IQR for this location is also shifted higher compared to the other suburbs, spanning roughly from 28 to 80 years. Angliss exhibits the youngest median age at approximately 48 years, while Box Hill, Maroondah, and Wantirna show relatively similar median ages clustered between 53 and 55 years. Across all locations, the age range remains broad, extending from near 0 to nearly 100 years.
 
-```{r}
-# Plot 4: Histogram - Age Distribution
-plot_age_hist <- ggplot(hospital_data, aes(x = Patient_Age)) +
-  geom_histogram(binwidth = 5, fill = "steelblue", color = "white") +
-  labs(title = "Patient Age Distribution", x = "Age", y = "Amount of Patients") +
-  theme_minimal()
+Earlier findings established that older patient demographics could be a substantial cause of revenue loss, specifically seeing a clear upward shift in the median age to 80 for claims that have been written off. 
 
-plot_age_hist
-```
+The higher median age in Healesville directly correlates with its status as having one of the highest levels of unpaid claims and the most significant in late payments.
+
+The models suggests that billing for these older demographics is inherently more complex. Since Healesville treats a notably older population, it is disproportionately affected by the "at-risk" status of claims.
+
 
 
 ```{r}
@@ -245,33 +255,19 @@ plot_loc_hist <- ggplot(hospital_data, aes(x = Days_to_Pay, fill = Location)) +
 plot_loc_hist
 ```
 
-```{r, fig.width=16, fig.height=10, out.width="100%"}
-ggplot(hospital_data, aes(x = Days_to_Pay, fill = Location)) +
-  geom_histogram(binwidth = 2, color = "white") +
-  # Adding scales = "free_y" is the magic key here
-  facet_wrap(~Location, scales = "free_y") + 
-  xlim(0, 60) + 
-  geom_vline(xintercept = 21, linetype = "dashed", color = "red") +
-  labs(title = "Payment Latency: Shape of Distribution by Suburb",
-       x = "Days to Pay", y = "Frequency (Count)") +
-  theme_minimal(base_size = 17) + theme(legend.position = "none")
-```
+The most significant observation is the rightward shift in distributions for the more rural locations, Healesville and Angliss, compared to the more centrally located facilities. In Healesville, the data reveals a critical issue; despite having the lowest volume of the group, almost every single claim falls to the right of the 21-day red line. This indicates that rurality acts as a near-guarantee of overdue payment, with the bulk of invoices being paid  between 25 and 35 days.
 
+Angliss follows a similar trend, though with a much higher volume of patients than Healesville. The plot shows very few claims are settled within the first 10 days with the peak concentration occurring between 20 and 30 days. This suggests that while Angliss is a busier facility, it shares the same structural bottlenecks as Healesville, consistently pushing the majority of its revenue into the "overdue" category.
 
-Looking at the histograms we can see Box Hill demonstrates the quickest bill payment, with a narrow and tall distribution that peaks at approximately fifteen days with over 100 payments. The vast majority of these claims are resolved before the twenty-one-day due date represented by the red dashed line. Conversely, Healesville exhibits a sparse and highly skewed distribution where the highest frequencies occurs between 30 and 40 days. Maroondah and Angliss follow a normal distribution centered near the twenty-day mark, while Wantirna shows a slight positive skewness, indicating that a significant proportion of its invoices are processed just after the deadline.
+In contrast, the suburban hospitals like Box Hill, Maroondah and Wanrtirna show a more balanced financial profile. Box Hill manages to capture a wide spread of payment times, including a significant portion of early revenue (days 0–15) that the rural sites lack entirely. While it still has a large volume of late payments, the distribution is more uniform, suggesting a more diverse patient base or more efficient billing interactions that aren't entirely tied to a single delay factor.
 
-~~
+Maroondah shows a steady buildup of claims as the 21-day deadline approaches, with a peak after the due date that mirrors Box Hill’s. This could be because overdue bill reminders are sent out around here.
 
-Strategic Insights
-These visualizations highlight a critical distinction between high-volume efficiency and low-volume latency. Although Box Hill handles the highest count of invoices, its internal processes appear robust enough to maintain a rapid payment cycle. The data for Healesville is particularly concerning from an actuarial perspective, as the "Long Tail" extending toward sixty days represents a high degree of financial uncertainty. The fact that the mode for Healesville is situated entirely to the right of the red threshold suggests that late payment is the standard operational outcome for this region rather than the exception. This disparity implies that regional catchments may be facing specific barriers such as slower documentation turnaround or more complex insurer interactions that do not affect the more centralized sites.
+Wantirna displays a sharp spike of early payers who settle within the first 5 days, yet also maintains a secondary larger peak of late payers around the 25-day mark, mirroring the previous 2 hospitals.
 
-Operational Recommendations
-To enhance the predictability of the revenue stream, it is recommended that the Revenue Services department prioritizes a process audit for the Healesville and Wantirna catchments. Because the distributions in these areas are shifted toward the right, a standard follow-up at twenty-one days is likely occurring too late to be effective. Implementing an early intervention trigger at the fourteen-day mark specifically for these suburbs could assist in shifting the distribution toward the left. Furthermore, standardizing the documentation submission protocols used at Box Hill across the regional sites could help minimize the "Tail Risk" and reduce the frequency of claims that eventually require recommendation for external collection or write-off.
 
 
 ```{r}
-
-library(tidyverse)
 
 # 1. Focus only on the 'Paid' claims to see the payment distribution
 paid_only <- hospital_data %>%
@@ -283,7 +279,7 @@ ggplot(paid_only, aes(x = Days_to_Pay, color = Location, fill = Location)) +
   # 'geom_density' is the key for that smooth "U" or "Bell" shape
   geom_density(alpha = 0.1, size = 1) + 
   
-  # Standardizing the x-axis to show the 40+ day drop-off
+  # Standardising the x-axis to show the 40+ day drop-off
   xlim(0, 60) +
   geom_vline(xintercept = 21, linetype = "dashed", color = "red") +
   
@@ -296,21 +292,16 @@ ggplot(paid_only, aes(x = Days_to_Pay, color = Location, fill = Location)) +
 
 ```
 
-Quantitative Observations
-The probability density curves illustrate the relative likelihood of revenue collection at any given point in time for each catchment area within the Eastern Health network. While the vertical peaks vary significantly with Box Hill reaching a density of approximately 0.13 and Healesville peaking at roughly 0.05, the total area beneath each individual curve is mathematically equivalent to one. This property ensures that the visualisations remain comparable across locations regardless of differences in total claim volume. Box Hill exhibits a high-density spike concentrated between day ten and day twenty, whereas Healesville demonstrates a low-density spread that continues well past day forty. Maroondah and Wantirna show similar distributions with their peaks occurring almost exactly at the twenty-one-day due date represented by the red dashed line.
+The more suburban locations Box Hill, Maroondah, and Wantirna exhibit high probability densities early in the billing cycle meaning there's a high chance theyre paid right after the service. These curves show that a significant portion of their revenue is collected within the first two to three weeks meaning the probability of collection remains relatively high and stable during the initial period and begins a steep decline once the 30-day mark is reached.
 
-Strategic Insights
-The variation in curve shape provides a clear indicator of operational efficiency and predictability. Because the area is fixed, the tall and narrow peak for Box Hill confirms that nearly all successful payments are concentrated into a very short and predictable timeframe. In contrast, the short and wide hump for Healesville indicates that the revenue is stretched over a much longer duration. This stretching increases the volatility of the revenue stream and suggests a lack of administrative urgency in regional catchments until invoices are nearly two weeks overdue. The fact that the peaks for Maroondah and Wantirna sit directly on the red threshold indicates a high-stress environment where a significant portion of revenue is only secured at the final possible moment before becoming overdue.
-
-Operational Recommendations
-It is recommended that the Revenue Services department targets these peak density windows for more effective resource allocation. For high-performing urban catchments, administrative efforts are most effective within the second week of billing. For Healesville, where the peak is significantly delayed, Eastern Health should implement strategies designed to compress the curve toward the left. This would involve identifying regional barriers to documentation turnaround and applying earlier follow-up triggers at the fourteen-day mark. By shifting the density toward the left, the organisation can convert late and unpredictable cash flows into a more centralised and manageable revenue pattern that aligns with standard hospital payment terms.
+In contrast, Angliss and Healesville display a clear right shift in their probability distributions. Unlike their suburban counterparts, these two locations have very low collection probabilities in the first 10 days. Instead, their likelihood of payment is around and after the 21-day due date. Angliss shows the most extreme delay, with its most likely day its paid is peak occurring between 30 days.
 
 
 
 ```{r}
 # 1. Create Age Brackets
 heatmap_data <- hospital_data %>%
-  mutate(Age_Group = cut(Patient_Age, breaks = seq(10, 110, by = 10))) %>%
+  mutate(Age_Group = cut(Patient_Age, breaks = seq(0, 100, by = 10))) %>%
   group_by(Location, Age_Group) %>%
   summarise(Denial_Rate = mean(Status == "Written Off"), .groups = 'drop')
 
@@ -326,12 +317,9 @@ ggplot(heatmap_data, aes(x = Age_Group, y = Location, fill = Denial_Rate)) +
   theme_minimal()
 ```
 
+The heatmap identifies specific demographic clusters where revenue loss is most severe. The most dominant trend across the entire Eastern Health network is a sharp increase in denial rates as patients move into the 70-100 age brackets.
 
-Quantitative Observations
-The heatmap visualises the intersection of geographic location and patient demographics to identify specific clusters of revenue risk within the Eastern Health network. A primary trend is the substantial increase in denial rates as patient age increases, with the highest risks concentrated in the seventy to ninety age brackets across almost all catchments. Healesville presents the most significant hotspot in the eighty to ninety age group, where the denial rate approaches forty percent. Conversely, younger demographics, particularly the ten to twenty age group in Healesville and Angliss, represent the lowest risk areas with denial rates near zero. Wantirna exhibits a more elevated baseline of risk across the middle age brackets compared to the relatively lower and more consistent performance observed at Box Hill.
+The most critical "hotspot" on the map is found in the Healesville for the 70-80 age group. This cell is the darkest red on the entire grid, indicating a denial rate around the 50% mark. This visualises the  combination of a rural location and a senior patient demographic creates a perfect storm for claim denials. While other hospitals like Angliss and Maroondah also show high risk in their oldest cohorts (80-100), the intensity in Healesville suggests that being a senior in a rural area is the highest risk factor in the model.
 
-Strategic Insights
-The concentration of dark red tiles in the upper age categories suggests a systemic difficulty in successfully billing claims for elderly patients. This demographic likely involves more complex insurance arrangements, such as coordination between Medicare and private health funds, or requires more rigorous medical documentation to justify high-value imaging procedures. The extreme denial rate for the eighty to ninety cohort in Healesville is particularly noteworthy, as it indicates a localised administrative challenge or a high volume of complex aged-care related billing that is failing to meet insurer requirements. This contrast with the younger cohorts suggests that administrative errors are not uniform but are tied to specific demographic variables.
-
-Operational Recommendations
-It is recommended that a targeted risk-mitigation strategy be implemented focusing on the seventy-plus demographic. Administrative staff at the Healesville and Wantirna sites should receive specialised training in the specific documentation requirements for complex geriatric claims to pre-emptively resolve common billing discrepancies. Furthermore, the organisation could benefit from a high-risk flag system within the billing software that triggers a manual review for any claim involving a patient over the age of eighty at Healesville. By focusing intervention efforts on these clearly defined red zones, the revenue services team can maximise efficiency and significantly reduce the overall rate of claim denials.
+In contrast, the lighter areas of the heatmap covers the majority of the younger demographics, specifically those under the age of 50. For hospitals like Box Hill and Wantirna, the denial risk remains consistently relatively low and stable for all ages of patients, typically hovering near 0-20%. There are minor "blips" in the middle-aged cohorts—such as a slight increase for 40-50 year olds at Maroondah—but these are outliers compared to the overwhelming trend of aging related risk.
+  
