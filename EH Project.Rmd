@@ -1,5 +1,5 @@
 ---
-title: "EH Project - Predictive Debt Recovery Model"
+title: "EH Project - Debt Recovery Analysis"
 author: "Jordan Pett"
 date: "2026-04-19"
 output:
@@ -323,3 +323,12 @@ The most critical "hotspot" on the map is found in the Healesville for the 70-80
 
 In contrast, the lighter areas of the heatmap covers the majority of the younger demographics, specifically those under the age of 50. For hospitals like Box Hill and Wantirna, the denial risk remains consistently relatively low and stable for all ages of patients, typically hovering near 0-20%. There are minor "blips" in the middle-aged cohorts—such as a slight increase for 40-50 year olds at Maroondah—but these are outliers compared to the overwhelming trend of aging related risk.
   
+  
+
+# Conclusion: 
+
+The analysis of the simulated hospital claims reveals that patient age is a significant cause of revenue loss across Eastern Health hospitals. The trends depicted from models showing that older patients tend to have their invoices written off more and more invoices pending could demonstrate that the complexity of modern billing which relies heavily on digital communication like email and text messages create barriers for older demographics. Implementing an automated postal delivery system for patients above a specific age threshold could serve as a practical intervention to ensure invoices are received and understood, potentially reducing the high volume of pending and written-off claims observed in senior cohorts. 
+
+Geographic location also plays a critical role in the speed of revenue collection, highlighting a distinct performance gap between suburban and rural facilities. Suburban hospitals like Box Hill function captures a significant portion of early revenue within the first 15 days. In contrast, rural locations such as Healesville and Angliss face structural bottlenecks that push the vast majority of payments past the 21 day due date, with most rural invoices only being settled between 25 and 35 days. This could likely due to slower documentation turnarounds or longer postal delivery times. Internal review will need to be done to understood what is truly occurring.
+
+The most severe area of concern is when senior demographics intersect with rural locations. The data identifies a critical risk hotspot in Healesville specifically for the 70–80 age bracket, where the denial rate peaks at approximately 50% while younger patients under 50 consistently maintain low denial risks regardless of their location, the intensity of revenue loss in older rural populations is disproportionate. To optimise recovery, Eastern Health should focus on adapting to each location and age demographic in order to build a more efficient billing process.
